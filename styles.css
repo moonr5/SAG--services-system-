@@ -149,11 +149,22 @@ button, input, a { font-family: inherit; }
   font-weight: 600;
 }
 
+.rail-item[data-view="home"] { --rail-accent: #2f6fed; }
+.rail-item[data-view="services"] { --rail-accent: #7b61ff; }
+.rail-item[data-view="clients"] { --rail-accent: #1fa971; }
+.rail-item[data-view="projects"] { --rail-accent: #e39b2b; }
+.rail-item[data-view="industries"] { --rail-accent: #14919b; }
+.rail-item[data-view="solutions"] { --rail-accent: #d4a017; }
+.rail-item[data-view="about"] { --rail-accent: #5b7cfa; }
+.rail-item[data-view="contact"] { --rail-accent: #e25b78; }
+
 .rail-item:hover .rail-icon {
-  color: #1c1f26;
+  color: var(--rail-accent);
+  background: #fff;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--rail-accent) 28%, transparent);
   transform: scale(1.12);
 }
-.rail-item:hover .rail-label { color: #3e4450; }
+.rail-item:hover .rail-label { color: var(--rail-accent); }
 
 #rail-edge {
   stroke-dasharray: 1;
