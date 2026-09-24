@@ -6,7 +6,7 @@
   --line: #e3e1dc;
   --card: #ffffff;
   --shadow: 0 10px 28px rgba(28, 32, 40, 0.045), 0 1px 2px rgba(28, 32, 40, 0.03);
-  --rail: 108px;
+  --rail: 118px;
   --dock: 58px;
   --font: "Plus Jakarta Sans", "Segoe UI", sans-serif;
 }
@@ -55,7 +55,7 @@ button, input, a { font-family: inherit; }
   position: absolute;
   left: 0;
   top: 0;
-  width: 142px;
+  width: 132px;
   height: 100%;
 }
 
@@ -72,46 +72,52 @@ button, input, a { font-family: inherit; }
 .rail {
   position: fixed;
   z-index: 5;
-  top: 18px;
+  top: 12px;
   left: 0;
   bottom: var(--dock);
-  width: var(--rail);
+  width: 148px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .rail-nav {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  width: 84px;
+  width: 100%;
   height: 100%;
-  padding: 4px 0 18px;
+  padding: 2px 0 12px;
 }
 
 .rail-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  width: 76px;
+  gap: 3px;
+  width: 64px;
   text-decoration: none;
   color: #8d939b;
+  will-change: transform;
+  transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .rail-icon {
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 8px;
   color: #6f7580;
+  background: var(--bg);
+  position: relative;
+  z-index: 1;
+  transition: transform 0.28s ease, box-shadow 0.28s ease, color 0.2s ease;
 }
 
 .rail-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
   stroke: currentColor;
   stroke-width: 1.6;
   fill: none;
@@ -131,7 +137,7 @@ button, input, a { font-family: inherit; }
 }
 
 .rail-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   letter-spacing: -0.01em;
   color: #9aa0a8;
@@ -143,8 +149,49 @@ button, input, a { font-family: inherit; }
   font-weight: 600;
 }
 
-.rail-item:hover .rail-icon { color: #1c1f26; }
+.rail-item:hover .rail-icon {
+  color: #1c1f26;
+  transform: scale(1.12);
+}
 .rail-item:hover .rail-label { color: #3e4450; }
+
+#rail-edge {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw-line 1.45s cubic-bezier(0.45, 0, 0.15, 1) forwards;
+}
+
+#rail-glow {
+  stroke-dasharray: 0.07 0.93;
+  stroke-dashoffset: 0;
+  opacity: 0;
+  animation: glow-in 0.5s ease 1.35s forwards, travel 8s linear 1.35s infinite;
+}
+
+@keyframes draw-line {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes glow-in {
+  to { opacity: 0.85; }
+}
+
+@keyframes travel {
+  to { stroke-dashoffset: -1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #rail-edge,
+  #rail-glow,
+  .rail-item,
+  .rail-icon {
+    animation: none;
+    transition: none;
+  }
+
+  #rail-edge { stroke-dashoffset: 0; }
+  #rail-glow { display: none; }
+}
 
 .topbar {
   position: relative;
@@ -154,7 +201,7 @@ button, input, a { font-family: inherit; }
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   min-height: 72px;
-  padding: 14px 32px 0 128px;
+  padding: 14px 32px 0 136px;
 }
 
 .brand {
@@ -330,18 +377,18 @@ h1 {
 .search button:hover { background: #2a2e36; }
 
 .cards {
-  margin-top: 22px;
-  width: 100%;
+  margin-top: 18px;
+  width: min(680px, 88%);
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
 }
 
 .card {
   background: var(--card);
-  border-radius: 16px;
+  border-radius: 12px;
   min-height: 0;
-  padding: 16px 16px 14px;
+  padding: 11px 11px 10px;
   text-align: left;
   text-decoration: none;
   color: inherit;
@@ -358,8 +405,8 @@ h1 {
 }
 
 .card-icon {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   color: #2a2e36;
   display: block;
 }
@@ -378,24 +425,24 @@ h1 {
 .card-arrow svg { stroke-width: 1.75; }
 
 .card h2 {
-  margin: 12px 0 0;
-  font-size: 15px;
+  margin: 8px 0 0;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .card p {
-  margin: 6px 0 0;
-  font-size: 12.5px;
+  margin: 4px 0 0;
+  font-size: 11px;
   line-height: 1.45;
   font-weight: 500;
   color: #8d939b;
 }
 
 .card-arrow {
-  margin-top: 16px;
-  width: 16px;
-  height: 16px;
+  margin-top: 10px;
+  width: 13px;
+  height: 13px;
   color: #7d858e;
   display: block;
   flex: none;
