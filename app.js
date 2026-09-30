@@ -546,9 +546,9 @@ async function refreshDrive() {
   try {
     const [drive] = await api("/api/integrations");
     const labels = { connected: "Connected", syncing: "Syncing", connecting: "Connecting", error: "Error", not_connected: "Not connected" };
-    const colors = { connected: "#22c55e", syncing: "#eab308", connecting: "#eab308", error: "#ef4444", not_connected: "#b0b5bc" };
+    const colors = { connected: "#3A8F6E", syncing: "#C4A56A", connecting: "#C4A56A", error: "#B85C5C", not_connected: "#A3B9B5" };
     driveState.lastChild.textContent = ` ${labels[drive.status] || "Not connected"}`;
-    driveState.style.color = drive.status === "connected" ? "#1a9d45" : "#8b9199";
+    driveState.style.color = drive.status === "connected" ? "#2F7A5C" : "#526C68";
     const dot = driveState.querySelector("i");
     if (dot) dot.style.background = colors[drive.status] || colors.not_connected;
     document.querySelector(".drive-chip")?.setAttribute("aria-label", `Google Drive, ${labels[drive.status] || "Not connected"}`);
@@ -584,13 +584,13 @@ async function refreshHealth() {
     );
     const failed = data.components.some((item) => item.status === "error") || database !== "operational";
     label.textContent = failed ? "A system needs attention" : drive === "connected" ? "All systems operational" : "Core systems operational";
-    if (dot) dot.style.background = failed ? "#ef4444" : "#3dcc6a";
+    if (dot) dot.style.background = failed ? "#B85C5C" : "#3A8F6E";
   } catch {
     markIcon("status-network", "is-bad", "Network is offline");
     markIcon("status-database", "is-bad", "Database is unreachable");
     markIcon("status-cloud", "is-bad", "Google Drive status is unknown");
     label.textContent = "Knowledge service offline";
-    if (dot) dot.style.background = "#b0b5bc";
+    if (dot) dot.style.background = "#A3B9B5";
   }
 }
 
