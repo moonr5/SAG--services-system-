@@ -1,27 +1,122 @@
 const items = document.querySelectorAll(".rail-item");
 const railPath = document.getElementById("rail-edge");
 const railGlow = document.getElementById("rail-glow");
+const railGlowSoft = document.getElementById("rail-glow-soft");
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 let bases = [];
 let amplitude = 48;
 let breathing = false;
+let pathLength = 1;
+let travelStart = 0;
+let orbitRanges = [];
+let lastPathAmp = null;
+const TRAVEL_MS = 3600;
+const GLOW_SPAN = 0.042;
 
 function curveX(y, amp) {
   const t = Math.min(1, Math.max(0, y / 1000));
   return 58 + amp * Math.sin(Math.PI * t);
 }
 
-function buildPath(amp) {
-  const steps = 56;
-  let d = "";
-  for (let i = 0; i <= steps; i += 1) {
-    const y = 16 + (i / steps) * 968;
-    const x = curveX(y, amp);
-    d += `${i ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
+function roundedOrbit(cx, cy, hw, hh, radius, side) {
+  const L = cx - hw;
+  const R = cx + hw;
+  const T = cy - hh;
+  const B = cy + hh;
+  const r = Math.min(radius, hw * 0.55, hh * 0.55);
+  if (side >= 0) {
+    return [
+      `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
+      `L ${(R - r).toFixed(2)} ${T.toFixed(2)}`,
+      `A ${r} ${r} 0 0 1 ${R.toFixed(2)} ${(T + r).toFixed(2)}`,
+      `L ${R.toFixed(2)} ${(B - r).toFixed(2)}`,
+      `A ${r} ${r} 0 0 1 ${(R - r).toFixed(2)} ${B.toFixed(2)}`,
+      `L ${(L + r).toFixed(2)} ${B.toFixed(2)}`,
+      `A ${r} ${r} 0 0 1 ${L.toFixed(2)} ${(B - r).toFixed(2)}`,
+      `L ${L.toFixed(2)} ${(T + r).toFixed(2)}`,
+      `A ${r} ${r} 0 0 1 ${(L + r).toFixed(2)} ${T.toFixed(2)}`,
+      `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
+      `L ${cx.toFixed(2)} ${B.toFixed(2)}`,
+    ].join(" ");
   }
+  return [
+    `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
+    `L ${(L + r).toFixed(2)} ${T.toFixed(2)}`,
+    `A ${r} ${r} 0 0 0 ${L.toFixed(2)} ${(T + r).toFixed(2)}`,
+    `L ${L.toFixed(2)} ${(B - r).toFixed(2)}`,
+    `A ${r} ${r} 0 0 0 ${(L + r).toFixed(2)} ${B.toFixed(2)}`,
+    `L ${(R - r).toFixed(2)} ${B.toFixed(2)}`,
+    `A ${r} ${r} 0 0 0 ${R.toFixed(2)} ${(B - r).toFixed(2)}`,
+    `L ${R.toFixed(2)} ${(T + r).toFixed(2)}`,
+    `A ${r} ${r} 0 0 0 ${(R - r).toFixed(2)} ${T.toFixed(2)}`,
+    `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
+    `L ${cx.toFixed(2)} ${B.toFixed(2)}`,
+  ].join(" ");
+}
+
+function nearestLength(targetX, targetY, from = 0, to = 1, samples = 64) {
+  let best = from;
+  let bestDist = Infinity;
+  for (let i = 0; i <= samples; i += 1) {
+    const t = from + ((to - from) * i) / samples;
+    const pt = railPath.getPointAtLength(t * pathLength);
+    const dist = Math.hypot(pt.x - targetX, pt.y - targetY);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = t;
+    }
+  }
+  return best;
+}
+
+function buildPath(amp, force = false) {
+  if (!force && lastPathAmp !== null && Math.abs(amp - lastPathAmp) < 0.35) return;
+  lastPathAmp = amp;
+
+  const shape = document.querySelector(".sider-shape").getBoundingClientRect();
+  const hw = Math.max(11, (16 / Math.max(shape.width, 1)) * 200);
+  const hh = Math.max(9, (16 / Math.max(shape.height, 1)) * 1000);
+  const corner = Math.min(6.5, hw * 0.42);
+
+  const nodes = bases.length
+    ? bases.map((base, index) => ({
+        cx: curveX(base.y, amp),
+        cy: base.y,
+        side: index % 2 === 0 ? 1 : -1,
+        icon: base.icon,
+      }))
+    : Array.from({ length: 8 }, (_, index) => {
+        const y = 70 + index * 115;
+        return { cx: curveX(y, amp), cy: y, side: index % 2 === 0 ? 1 : -1, icon: null };
+      });
+
+  let d = `M ${nodes[0].cx.toFixed(2)} 12`;
+  nodes.forEach((node, index) => {
+    const prevY = index === 0 ? 12 : nodes[index - 1].cy + hh;
+    const midY = (prevY + (node.cy - hh)) / 2;
+    const sway = node.side * (amp * 0.12);
+    d += ` C ${(node.cx + sway).toFixed(2)} ${midY.toFixed(2)}, ${(node.cx - sway).toFixed(2)} ${midY.toFixed(2)}, ${node.cx.toFixed(2)} ${(node.cy - hh).toFixed(2)}`;
+    d += ` ${roundedOrbit(node.cx, node.cy, hw, hh, corner, node.side)}`;
+  });
+  d += ` L ${nodes[nodes.length - 1].cx.toFixed(2)} 988`;
+
   railPath.setAttribute("d", d);
   railGlow.setAttribute("d", d);
+  if (railGlowSoft) railGlowSoft.setAttribute("d", d);
+
+  pathLength = railPath.getTotalLength() || 1;
+  orbitRanges = nodes.map((node, index) => {
+    const searchFrom = index / nodes.length;
+    const searchTo = Math.min(1, (index + 1.15) / nodes.length);
+    const start = nearestLength(node.cx, node.cy - hh, searchFrom, searchTo, 48);
+    const end = nearestLength(node.cx, node.cy + hh, start, Math.min(1, start + 0.18), 48);
+    return { icon: node.icon, start, end: Math.max(start + 0.012, end) };
+  });
+
+  const dash = `${GLOW_SPAN * pathLength} ${pathLength}`;
+  railGlow.style.strokeDasharray = dash;
+  if (railGlowSoft) railGlowSoft.style.strokeDasharray = `${GLOW_SPAN * 1.85 * pathLength} ${pathLength}`;
 }
 
 function captureBases() {
@@ -30,13 +125,16 @@ function captureBases() {
   });
   const shape = document.querySelector(".sider-shape").getBoundingClientRect();
   bases = [...items].map((item) => {
-    const icon = item.querySelector(".rail-icon").getBoundingClientRect();
+    const icon = item.querySelector(".rail-icon");
+    const box = icon.getBoundingClientRect();
     return {
       item,
-      cx: icon.left + icon.width / 2,
-      y: ((icon.top + icon.height / 2 - shape.top) / shape.height) * 1000,
+      icon,
+      cx: box.left + box.width / 2,
+      y: ((box.top + box.height / 2 - shape.top) / shape.height) * 1000,
     };
   });
+  lastPathAmp = null;
 }
 
 function applyPositions(amp) {
@@ -47,33 +145,62 @@ function applyPositions(amp) {
   });
 }
 
+function setGlowProgress(progress) {
+  const offset = progress * pathLength;
+  railGlow.style.strokeDashoffset = String(-offset);
+  if (railGlowSoft) railGlowSoft.style.strokeDashoffset = String(-offset);
+
+  items.forEach((item) => item.querySelector(".rail-icon")?.classList.remove("is-lit"));
+  orbitRanges.forEach(({ icon, start, end }) => {
+    if (!icon) return;
+    if (progress >= start - 0.006 && progress <= end + 0.012) {
+      icon.classList.add("is-lit");
+    }
+  });
+}
+
 function frame(now) {
   if (!breathing) return;
-  amplitude = 48 + Math.sin(now / 2400) * 5;
+  amplitude = 48 + Math.sin(now / 2800) * 4;
   buildPath(amplitude);
   applyPositions(amplitude);
+  if (!travelStart) travelStart = now;
+  const progress = ((now - travelStart) % TRAVEL_MS) / TRAVEL_MS;
+  setGlowProgress(progress);
   requestAnimationFrame(frame);
 }
 
-buildPath(amplitude);
 captureBases();
+buildPath(amplitude, true);
 
 if (reduceMotion) {
   applyPositions(amplitude);
+  railGlow.style.opacity = "0";
+  if (railGlowSoft) railGlowSoft.style.opacity = "0";
 } else {
   items.forEach((item, index) => {
-    item.style.transitionDelay = `${0.08 + index * 0.07}s`;
+    item.style.transitionDelay = `${0.05 + index * 0.04}s`;
   });
+  railPath.style.strokeDasharray = String(pathLength);
+  railPath.style.strokeDashoffset = String(pathLength);
+  railPath.style.transition = "stroke-dashoffset 0.85s cubic-bezier(0.4, 0, 0.15, 1)";
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => applyPositions(amplitude));
+    requestAnimationFrame(() => {
+      applyPositions(amplitude);
+      railPath.style.strokeDashoffset = "0";
+    });
   });
   window.setTimeout(() => {
     items.forEach((item) => {
       item.style.transition = "none";
     });
+    railPath.style.transition = "none";
+    railPath.style.strokeDasharray = "none";
+    railPath.style.strokeDashoffset = "0";
+    travelStart = performance.now();
     breathing = true;
     requestAnimationFrame(frame);
-  }, 1700);
+  }, 900);
 }
 
 window.addEventListener("resize", () => {
@@ -84,7 +211,9 @@ window.addEventListener("resize", () => {
   });
   captureBases();
   applyPositions(amplitude);
+  buildPath(amplitude, true);
   if (wasBreathing && !reduceMotion) {
+    travelStart = performance.now();
     breathing = true;
     requestAnimationFrame(frame);
   }
@@ -546,9 +675,9 @@ async function refreshDrive() {
   try {
     const [drive] = await api("/api/integrations");
     const labels = { connected: "Connected", syncing: "Syncing", connecting: "Connecting", error: "Error", not_connected: "Not connected" };
-    const colors = { connected: "#3A8F6E", syncing: "#C4A56A", connecting: "#C4A56A", error: "#B85C5C", not_connected: "#A3B9B5" };
+    const colors = { connected: "#C4A56A", syncing: "#9C7F45", connecting: "#9C7F45", error: "#E2EAE8", not_connected: "#A3B9B5" };
     driveState.lastChild.textContent = ` ${labels[drive.status] || "Not connected"}`;
-    driveState.style.color = drive.status === "connected" ? "#2F7A5C" : "#526C68";
+    driveState.style.color = drive.status === "connected" ? "#C4A56A" : "#A3B9B5";
     const dot = driveState.querySelector("i");
     if (dot) dot.style.background = colors[drive.status] || colors.not_connected;
     document.querySelector(".drive-chip")?.setAttribute("aria-label", `Google Drive, ${labels[drive.status] || "Not connected"}`);
@@ -584,7 +713,7 @@ async function refreshHealth() {
     );
     const failed = data.components.some((item) => item.status === "error") || database !== "operational";
     label.textContent = failed ? "A system needs attention" : drive === "connected" ? "All systems operational" : "Core systems operational";
-    if (dot) dot.style.background = failed ? "#B85C5C" : "#3A8F6E";
+    if (dot) dot.style.background = failed ? "#E2EAE8" : "#C4A56A";
   } catch {
     markIcon("status-network", "is-bad", "Network is offline");
     markIcon("status-database", "is-bad", "Database is unreachable");

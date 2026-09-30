@@ -12,8 +12,24 @@
 <body>
   <div class="atmosphere" aria-hidden="true">
     <svg class="sider-shape" viewBox="0 0 200 1000" preserveAspectRatio="none">
-      <path id="rail-edge" fill="none" stroke="#C9D6D3" stroke-width="1.35" stroke-linecap="round" vector-effect="non-scaling-stroke" pathLength="1"/>
-      <path id="rail-glow" fill="none" stroke="#C4A56A" stroke-width="1.7" stroke-linecap="round" vector-effect="non-scaling-stroke" pathLength="1"/>
+      <defs>
+        <linearGradient id="rail-glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#E2EAE8"/>
+          <stop offset="35%" stop-color="#C4A56A"/>
+          <stop offset="65%" stop-color="#9C7F45"/>
+          <stop offset="100%" stop-color="#A3B9B5"/>
+        </linearGradient>
+        <filter id="rail-bloom" x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+      <path id="rail-edge" fill="none" stroke="#C9D6D3" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <path id="rail-glow-soft" fill="none" stroke="#C4A56A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" filter="url(#rail-bloom)" vector-effect="non-scaling-stroke"/>
+      <path id="rail-glow" fill="none" stroke="url(#rail-glow-grad)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
     </svg>
     <svg class="waves" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice">
       <defs>
