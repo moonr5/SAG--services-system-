@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#F6F8F7" />
   <title>Stratgon Agara Global — Navigating Complexity with Delivering Simplicity</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,26 +12,6 @@
 </head>
 <body>
   <div class="atmosphere" aria-hidden="true">
-    <svg class="sider-shape" viewBox="0 0 200 1000" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="rail-glow-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#E2EAE8"/>
-          <stop offset="35%" stop-color="#C4A56A"/>
-          <stop offset="65%" stop-color="#9C7F45"/>
-          <stop offset="100%" stop-color="#A3B9B5"/>
-        </linearGradient>
-        <filter id="rail-bloom" x="-80%" y="-80%" width="260%" height="260%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="blur"/>
-          <feMerge>
-            <feMergeNode in="blur"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
-      </defs>
-      <path id="rail-edge" fill="none" stroke="#C9D6D3" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-      <path id="rail-glow-soft" fill="none" stroke="#C4A56A" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" filter="url(#rail-bloom)" vector-effect="non-scaling-stroke"/>
-      <path id="rail-glow" fill="none" stroke="url(#rail-glow-grad)" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-    </svg>
     <svg class="waves" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice">
       <defs>
         <filter id="wave-blur" x="-20%" y="-40%" width="140%" height="180%">
@@ -45,6 +26,18 @@
   </div>
 
   <aside class="rail">
+    <div class="rail-fx" aria-hidden="true">
+      <svg class="rail-base" focusable="false">
+        <defs>
+          <linearGradient id="rail-ink" gradientUnits="userSpaceOnUse" x1="3" y1="3" x2="21" y2="21">
+            <stop class="rail-ink-a" offset="0"/>
+            <stop class="rail-ink-b" offset="1"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <canvas class="rail-bloom"></canvas>
+      <canvas class="rail-light"></canvas>
+    </div>
     <nav class="rail-nav" aria-label="Primary">
       <a class="rail-item is-active" href="#home" data-view="home">
         <span class="rail-icon">
@@ -144,8 +137,8 @@
   <main id="home">
     <section class="hero" aria-labelledby="hero-title">
       <p class="eyebrow"><span>Explore our services</span></p>
-      <h1 id="hero-title">What can we help you with?</h1>
-      <p class="lede">Discover our services, clients, and projects. Find the right solution<br />for your business needs.</p>
+      <h1 id="hero-title">What can we <span class="accent">help</span> you with?</h1>
+      <p class="lede">Discover our services, clients, and projects. Find the right solution <br />for your business needs.</p>
 
       <form class="search" role="search" action="#search" method="get">
         <label class="sr-only" for="q">Search</label>
@@ -250,7 +243,7 @@
       <button type="button" class="status-icon" id="status-cloud" data-go="connections" aria-label="Google Drive">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10.2a4.2 4.2 0 0 0 .6-8.35A6.2 6.2 0 0 0 6.3 11 3.6 3.6 0 0 0 7 18Z"/></svg>
       </button>
-      <button type="button" class="status-text" id="system-status"><i></i><span id="status-label">Checking systems</span></button>
+      <button type="button" class="status-text" id="system-status" data-state="checking"><i></i><span id="status-label">Checking systems</span></button>
     </div>
 
     <div class="dock-user">
@@ -266,7 +259,7 @@
     </div>
 
     <div class="dock-connections">
-      <button type="button" class="drive-chip" aria-label="Google Drive, connected">
+      <button type="button" class="drive-chip" data-state="checking" aria-label="Google Drive, checking">
         <svg class="drive-logo" viewBox="0 0 87.3 78" aria-hidden="true">
           <path fill="#0066da" d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3L27.5 53H0c0 1.55.4 3.1 1.2 4.5z"/>
           <path fill="#00ac47" d="M43.65 25 29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0-1.2 4.5H27.5z"/>
@@ -277,7 +270,7 @@
         </svg>
         <span class="drive-copy">
           <span class="drive-name">Google Drive</span>
-          <span class="drive-state"><i></i> Connected</span>
+          <span class="drive-state"><i></i><span class="drive-state-label">Checking</span></span>
         </span>
         <svg class="drive-chevron" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m9 6 6 6-6 6"/>

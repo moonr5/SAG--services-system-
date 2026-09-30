@@ -1,227 +1,898 @@
 const items = document.querySelectorAll(".rail-item");
-const railPath = document.getElementById("rail-edge");
-const railGlow = document.getElementById("rail-glow");
-const railGlowSoft = document.getElementById("rail-glow-soft");
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-let bases = [];
-let amplitude = 48;
-let breathing = false;
-let pathLength = 1;
-let travelStart = 0;
-let orbitRanges = [];
-let lastPathAmp = null;
-const TRAVEL_MS = 3600;
-const GLOW_SPAN = 0.042;
+// The rail: a curved track through the nav icons with a brass light running along it.
+// The light wraps every icon it reaches, rushes to the icon under the pointer or keyboard
+// focus, and flares on the page that opens. Everything that moves is drawn on two canvases
+// (a crisp layer and a blurred bloom layer), so animation frames never touch layout.
+// The track runs down the side on wide screens and across the bottom bar on phones
+// (--rail-axis), and all of its colours come from CSS custom properties.
+const railLight = (() => {
+  const rail = document.querySelector(".rail");
+  const fx = rail?.querySelector(".rail-fx");
+  if (!fx || !items.length) return { setActive() {} };
 
-function curveX(y, amp) {
-  const t = Math.min(1, Math.max(0, y / 1000));
-  return 58 + amp * Math.sin(Math.PI * t);
-}
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const base = fx.querySelector(".rail-base");
+  const bloomCanvas = fx.querySelector(".rail-bloom");
+  const lightCanvas = fx.querySelector(".rail-light");
+  const bloom = bloomCanvas.getContext("2d");
+  const light = lightCanvas.getContext("2d");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-function roundedOrbit(cx, cy, hw, hh, radius, side) {
-  const L = cx - hw;
-  const R = cx + hw;
-  const T = cy - hh;
-  const B = cy + hh;
-  const r = Math.min(radius, hw * 0.55, hh * 0.55);
-  if (side >= 0) {
-    return [
-      `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
-      `L ${(R - r).toFixed(2)} ${T.toFixed(2)}`,
-      `A ${r} ${r} 0 0 1 ${R.toFixed(2)} ${(T + r).toFixed(2)}`,
-      `L ${R.toFixed(2)} ${(B - r).toFixed(2)}`,
-      `A ${r} ${r} 0 0 1 ${(R - r).toFixed(2)} ${B.toFixed(2)}`,
-      `L ${(L + r).toFixed(2)} ${B.toFixed(2)}`,
-      `A ${r} ${r} 0 0 1 ${L.toFixed(2)} ${(B - r).toFixed(2)}`,
-      `L ${L.toFixed(2)} ${(T + r).toFixed(2)}`,
-      `A ${r} ${r} 0 0 1 ${(L + r).toFixed(2)} ${T.toFixed(2)}`,
-      `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
-      `L ${cx.toFixed(2)} ${B.toFixed(2)}`,
-    ].join(" ");
-  }
-  return [
-    `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
-    `L ${(L + r).toFixed(2)} ${T.toFixed(2)}`,
-    `A ${r} ${r} 0 0 0 ${L.toFixed(2)} ${(T + r).toFixed(2)}`,
-    `L ${L.toFixed(2)} ${(B - r).toFixed(2)}`,
-    `A ${r} ${r} 0 0 0 ${(L + r).toFixed(2)} ${B.toFixed(2)}`,
-    `L ${(R - r).toFixed(2)} ${B.toFixed(2)}`,
-    `A ${r} ${r} 0 0 0 ${R.toFixed(2)} ${(B - r).toFixed(2)}`,
-    `L ${R.toFixed(2)} ${(T + r).toFixed(2)}`,
-    `A ${r} ${r} 0 0 0 ${(R - r).toFixed(2)} ${T.toFixed(2)}`,
-    `L ${cx.toFixed(2)} ${T.toFixed(2)}`,
-    `L ${cx.toFixed(2)} ${B.toFixed(2)}`,
-  ].join(" ");
-}
+  const RING_GAP = 4; // px between an icon and the ring the light runs on
+  const LABEL_CLEARANCE = 5; // the track resumes this far below each label
+  const LINK_SWAY = 3;
+  const CURVE_STEPS = 48;
+  const SPEED_LINK = 780; // px/s
+  const SPEED_RING = 560;
+  const SPEED_SEEK = 1500;
+  const SPEED_ORBIT = 170;
+  const TRAIL_MS = 260;
+  const TRAIL_LEN = 130;
+  const TRAIL_CAP = 1024;
+  const INTRO_MS = 650;
+  const REST_MS = 1300;
+  const VISIT_MS = 1400;
+  const BURST_MS = 700;
+  const BLOOM_SCALE = 0.5;
 
-function nearestLength(targetX, targetY, from = 0, to = 1, samples = 64) {
-  let best = from;
-  let bestDist = Infinity;
-  for (let i = 0; i <= samples; i += 1) {
-    const t = from + ((to - from) * i) / samples;
-    const pt = railPath.getPointAtLength(t * pathLength);
-    const dist = Math.hypot(pt.x - targetX, pt.y - targetY);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = t;
-    }
-  }
-  return best;
-}
-
-function buildPath(amp, force = false) {
-  if (!force && lastPathAmp !== null && Math.abs(amp - lastPathAmp) < 0.35) return;
-  lastPathAmp = amp;
-
-  const shape = document.querySelector(".sider-shape").getBoundingClientRect();
-  const hw = Math.max(11, (16 / Math.max(shape.width, 1)) * 200);
-  const hh = Math.max(9, (16 / Math.max(shape.height, 1)) * 1000);
-  const corner = Math.min(6.5, hw * 0.42);
-
-  const nodes = bases.length
-    ? bases.map((base, index) => ({
-        cx: curveX(base.y, amp),
-        cy: base.y,
-        side: index % 2 === 0 ? 1 : -1,
-        icon: base.icon,
-      }))
-    : Array.from({ length: 8 }, (_, index) => {
-        const y = 70 + index * 115;
-        return { cx: curveX(y, amp), cy: y, side: index % 2 === 0 ? 1 : -1, icon: null };
-      });
-
-  let d = `M ${nodes[0].cx.toFixed(2)} 12`;
-  nodes.forEach((node, index) => {
-    const prevY = index === 0 ? 12 : nodes[index - 1].cy + hh;
-    const midY = (prevY + (node.cy - hh)) / 2;
-    const sway = node.side * (amp * 0.12);
-    d += ` C ${(node.cx + sway).toFixed(2)} ${midY.toFixed(2)}, ${(node.cx - sway).toFixed(2)} ${midY.toFixed(2)}, ${node.cx.toFixed(2)} ${(node.cy - hh).toFixed(2)}`;
-    d += ` ${roundedOrbit(node.cx, node.cy, hw, hh, corner, node.side)}`;
-  });
-  d += ` L ${nodes[nodes.length - 1].cx.toFixed(2)} 988`;
-
-  railPath.setAttribute("d", d);
-  railGlow.setAttribute("d", d);
-  if (railGlowSoft) railGlowSoft.setAttribute("d", d);
-
-  pathLength = railPath.getTotalLength() || 1;
-  orbitRanges = nodes.map((node, index) => {
-    const searchFrom = index / nodes.length;
-    const searchTo = Math.min(1, (index + 1.15) / nodes.length);
-    const start = nearestLength(node.cx, node.cy - hh, searchFrom, searchTo, 48);
-    const end = nearestLength(node.cx, node.cy + hh, start, Math.min(1, start + 0.18), 48);
-    return { icon: node.icon, start, end: Math.max(start + 0.012, end) };
-  });
-
-  const dash = `${GLOW_SPAN * pathLength} ${pathLength}`;
-  railGlow.style.strokeDasharray = dash;
-  if (railGlowSoft) railGlowSoft.style.strokeDasharray = `${GLOW_SPAN * 1.85 * pathLength} ${pathLength}`;
-}
-
-function captureBases() {
-  items.forEach((item) => {
-    item.style.transform = "none";
-  });
-  const shape = document.querySelector(".sider-shape").getBoundingClientRect();
-  bases = [...items].map((item) => {
-    const icon = item.querySelector(".rail-icon");
-    const box = icon.getBoundingClientRect();
+  const nodes = [...items].map((item, index) => {
+    item.style.setProperty("--i", index);
     return {
       item,
-      icon,
-      cx: box.left + box.width / 2,
-      y: ((box.top + box.height / 2 - shape.top) / shape.height) * 1000,
+      icon: item.querySelector(".rail-icon"),
+      label: item.querySelector(".rail-label"),
+      shift: "",
+      ringEl: null,
+      glow: { energy: 0, full: false, u0: 0, w: 0, lo: 0, hi: 0, burstAt: 0, flaredAt: 0, lit: false },
     };
   });
-  lastPathAmp = null;
-}
+  const comet = { alive: false, s: 0, v: 0, orbit: 0, restUntil: 0 };
+  const trail = {
+    x: new Float32Array(TRAIL_CAP),
+    y: new Float32Array(TRAIL_CAP),
+    vis: new Float32Array(TRAIL_CAP),
+    t: new Float64Array(TRAIL_CAP),
+    reach: new Float32Array(TRAIL_CAP),
+    head: 0,
+    count: 0,
+  };
+  const probe = { x: 0, y: 0, vis: 1 };
+  const mod = (value, size) => ((value % size) + size) % size;
+  const fmt = (value) => value.toFixed(2);
 
-function applyPositions(amp) {
-  const shape = document.querySelector(".sider-shape").getBoundingClientRect();
-  bases.forEach(({ item, cx, y }) => {
-    const edge = shape.left + (curveX(y, amp) / 200) * shape.width;
-    item.style.transform = `translateX(${edge - cx}px)`;
-  });
-}
+  let geo = null;
+  let theme = { key: "", sweep: [], trail: [], core: "#FFFFFF" };
+  let baseParts = [];
+  let running = false;
+  let frameId = 0;
+  let lastFrame = 0;
+  let holdUntil = 0;
+  let idle = false;
+  let queued = false;
+  let hoverIndex = null;
+  let activeIndex = -1;
+  let visit = null;
+  let pendingFlare = null;
+  let cometRing = -1;
 
-function setGlowProgress(progress) {
-  const offset = progress * pathLength;
-  railGlow.style.strokeDashoffset = String(-offset);
-  if (railGlowSoft) railGlowSoft.style.strokeDashoffset = String(-offset);
+  // ── Colour ──
+  // The light's colours come from CSS (--rail-sweep, --rail-trail, --rail-core), so the
+  // palette lives in one place. They're blended in OKLab, which keeps the steps between
+  // brand colours even instead of dipping through muddy mid-tones.
 
-  items.forEach((item) => item.querySelector(".rail-icon")?.classList.remove("is-lit"));
-  orbitRanges.forEach(({ icon, start, end }) => {
-    if (!icon) return;
-    if (progress >= start - 0.006 && progress <= end + 0.012) {
-      icon.classList.add("is-lit");
-    }
-  });
-}
-
-function frame(now) {
-  if (!breathing) return;
-  amplitude = 48 + Math.sin(now / 2800) * 4;
-  buildPath(amplitude);
-  applyPositions(amplitude);
-  if (!travelStart) travelStart = now;
-  const progress = ((now - travelStart) % TRAVEL_MS) / TRAVEL_MS;
-  setGlowProgress(progress);
-  requestAnimationFrame(frame);
-}
-
-captureBases();
-buildPath(amplitude, true);
-
-if (reduceMotion) {
-  applyPositions(amplitude);
-  railGlow.style.opacity = "0";
-  if (railGlowSoft) railGlowSoft.style.opacity = "0";
-} else {
-  items.forEach((item, index) => {
-    item.style.transitionDelay = `${0.05 + index * 0.04}s`;
-  });
-  railPath.style.strokeDasharray = String(pathLength);
-  railPath.style.strokeDashoffset = String(pathLength);
-  railPath.style.transition = "stroke-dashoffset 0.85s cubic-bezier(0.4, 0, 0.15, 1)";
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      applyPositions(amplitude);
-      railPath.style.strokeDashoffset = "0";
-    });
-  });
-  window.setTimeout(() => {
-    items.forEach((item) => {
-      item.style.transition = "none";
-    });
-    railPath.style.transition = "none";
-    railPath.style.strokeDasharray = "none";
-    railPath.style.strokeDashoffset = "0";
-    travelStart = performance.now();
-    breathing = true;
-    requestAnimationFrame(frame);
-  }, 900);
-}
-
-window.addEventListener("resize", () => {
-  const wasBreathing = breathing;
-  breathing = false;
-  items.forEach((item) => {
-    item.style.transition = "none";
-  });
-  captureBases();
-  applyPositions(amplitude);
-  buildPath(amplitude, true);
-  if (wasBreathing && !reduceMotion) {
-    travelStart = performance.now();
-    breathing = true;
-    requestAnimationFrame(frame);
+  function readTheme() {
+    const style = getComputedStyle(rail);
+    const list = (name) => style.getPropertyValue(name).split(",").map((value) => value.trim()).filter(Boolean);
+    const sweepColors = list("--rail-sweep");
+    const trailColors = list("--rail-trail");
+    const core = style.getPropertyValue("--rail-core").trim() || "#FFFFFF";
+    const key = `${sweepColors}|${trailColors}|${core}`;
+    if (key === theme.key) return;
+    theme = {
+      key,
+      sweep: blend(sweepColors.map(toLab), 240, true),
+      trail: blend(trailColors.map(toLab), 120, false),
+      core,
+    };
   }
-});
+
+  function toLab(color) {
+    // The canvas normalises any CSS colour to #rrggbb (or rgba() when translucent).
+    light.fillStyle = "#000000";
+    light.fillStyle = color;
+    const value = String(light.fillStyle);
+    const rgb = value.startsWith("#")
+      ? [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16))
+      : (value.match(/[\d.]+/g) || [0, 0, 0]).slice(0, 3).map(Number);
+    const [r, g, b] = rgb.map((c) => {
+      const v = c / 255;
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    });
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [
+      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+    ];
+  }
+
+  function labToRgb([L, A, B]) {
+    const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+    const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+    const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+    const encode = (v) => {
+      const c = Math.min(1, Math.max(0, v));
+      return Math.round(255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055));
+    };
+    const r = encode(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s);
+    const g = encode(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s);
+    const b = encode(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  // A lookup table of `size` colours through the stops; `cyclic` runs the last back into the first.
+  function blend(stops, size, cyclic) {
+    if (stops.length < 2) return [stops.length ? labToRgb(stops[0]) : "transparent"];
+    const spans = cyclic ? stops.length : stops.length - 1;
+    return Array.from({ length: size }, (_, i) => {
+      const f = (i / (cyclic ? size : size - 1)) * spans;
+      const k = Math.min(spans - 1, Math.floor(f));
+      const from = stops[k];
+      const to = stops[(k + 1) % stops.length];
+      return labToRgb(from.map((value, n) => value + (to[n] - value) * (f - k)));
+    });
+  }
+
+  const sweepAt = (u) => theme.sweep[Math.floor(mod(u, 1) * theme.sweep.length) % theme.sweep.length];
+  const trailAt = (f) => theme.trail[Math.min(theme.trail.length - 1, Math.max(0, Math.floor(f * theme.trail.length)))];
+
+  function sweep(ctx, cx, cy, angle) {
+    const gradient = ctx.createConicGradient
+      ? ctx.createConicGradient(angle, cx, cy)
+      : ctx.createLinearGradient(cx - Math.cos(angle) * 24, cy - Math.sin(angle) * 24, cx + Math.cos(angle) * 24, cy + Math.sin(angle) * 24);
+    for (let i = 0; i <= 12; i += 1) gradient.addColorStop(i / 12, sweepAt(i / 12));
+    return gradient;
+  }
+
+  // ── Track geometry ──
+  // The track is one path, sampled every pixel: a lead-in, then for each icon a ring
+  // unrolled to 1.5 laps and a curve to the next icon. Down the side, the light enters a
+  // ring at the top, leaves at the bottom and passes behind the label; across the bottom
+  // bar it enters on the left and leaves on the right. On a ring, s and s + P are the same
+  // point, which lets the light skip or repeat laps without leaving the path.
+
+  function measure() {
+    const box = fx.getBoundingClientRect();
+    const style = getComputedStyle(rail);
+    const length = (name, fallback) => {
+      const value = parseFloat(style.getPropertyValue(name));
+      return Number.isFinite(value) ? value : fallback;
+    };
+    const across = style.getPropertyValue("--rail-axis").trim() === "x";
+    const arcStart = length("--arc-start", 38);
+    const arcBulge = length("--arc-bulge", 0);
+    const corner = parseFloat(getComputedStyle(nodes[0].icon).borderTopLeftRadius) || 8;
+    const bow = (along, size) => Math.sin(Math.PI * Math.min(1, Math.max(0, along / size)));
+    const spots = nodes.map((node) => {
+      const iconBox = node.icon.getBoundingClientRect();
+      const labelBox = node.label.getBoundingClientRect();
+      // Where the item sits without the arc offset it may already have.
+      const moved = new DOMMatrixReadOnly(getComputedStyle(node.item).transform);
+      const x = iconBox.left + iconBox.width / 2 - box.left - moved.m41;
+      const y = iconBox.top + iconBox.height / 2 - box.top - moved.m42;
+      const cx = across ? x : arcStart + arcBulge * bow(y, box.height);
+      const cy = across ? y - arcBulge * bow(x, box.width) : y;
+      return {
+        cx,
+        cy,
+        dx: cx - x,
+        dy: cy - y,
+        half: node.icon.offsetWidth / 2 + RING_GAP,
+        radius: corner + RING_GAP,
+        labelBottom: labelBox.bottom - box.top - moved.m42 + (cy - y),
+      };
+    });
+    return { width: box.width, height: box.height, across, spots };
+  }
+
+  function place(spots) {
+    spots.forEach((spot, index) => {
+      const node = nodes[index];
+      const shift = `translate(${fmt(spot.dx)}px, ${fmt(spot.dy)}px)`;
+      if (node.shift === shift) return;
+      node.shift = shift;
+      node.item.style.transform = shift;
+    });
+  }
+
+  function straight(x0, y0, x1, y1, dip, drawn) {
+    const length = Math.hypot(x1 - x0, y1 - y0);
+    return {
+      length,
+      drawn,
+      path: drawn && length > 0.5 ? `M${fmt(x0)} ${fmt(y0)}L${fmt(x1)} ${fmt(y1)}` : "",
+      at(u, out) {
+        const f = length ? u / length : 0;
+        out.x = x0 + (x1 - x0) * f;
+        out.y = y0 + (y1 - y0) * f;
+        out.vis = 1 - dip * Math.sin(Math.PI * f);
+      },
+    };
+  }
+
+  function bezier(p, t, out) {
+    const m = 1 - t;
+    const a = m * m * m;
+    const b = 3 * m * m * t;
+    const c = 3 * m * t * t;
+    const d = t * t * t;
+    out.x = a * p[0] + b * p[2] + c * p[4] + d * p[6];
+    out.y = a * p[1] + b * p[3] + c * p[5] + d * p[7];
+  }
+
+  // A link between two icons, leaving and arriving along the track's axis with a slight bow.
+  function curve(x0, y0, x1, y1, side, across) {
+    const run = across ? (x1 - x0) / 2 : (y1 - y0) / 2;
+    const sway = side * Math.min(LINK_SWAY, Math.abs(run) * 0.16);
+    const p = across
+      ? [x0, y0, x0 + run, y0 + sway, x1 - run, y1 + sway, x1, y1]
+      : [x0, y0, x0 + sway, y0 + run, x1 + sway, y1 - run, x1, y1];
+    const table = new Float32Array(CURVE_STEPS + 1);
+    let px = x0;
+    let py = y0;
+    for (let i = 1; i <= CURVE_STEPS; i += 1) {
+      bezier(p, i / CURVE_STEPS, probe);
+      table[i] = table[i - 1] + Math.hypot(probe.x - px, probe.y - py);
+      px = probe.x;
+      py = probe.y;
+    }
+    return {
+      length: table[CURVE_STEPS],
+      drawn: true,
+      path: `M${fmt(x0)} ${fmt(y0)}C${fmt(p[2])} ${fmt(p[3])} ${fmt(p[4])} ${fmt(p[5])} ${fmt(x1)} ${fmt(y1)}`,
+      at(u, out) {
+        let lo = 0;
+        let hi = CURVE_STEPS;
+        while (hi - lo > 1) {
+          const mid = (lo + hi) >> 1;
+          if (table[mid] <= u) lo = mid;
+          else hi = mid;
+        }
+        const span = table[hi] - table[lo];
+        bezier(p, (lo + (span ? (u - table[lo]) / span : 0)) / CURVE_STEPS, out);
+        out.vis = 1;
+      },
+    };
+  }
+
+  function loop({ cx, cy, half, radius }, dir, across) {
+    const edge = half - radius;
+    const quarter = (Math.PI / 2) * radius;
+    const sweepFlag = dir > 0 ? 1 : 0;
+    const x = (dx) => fmt(cx + dir * dx);
+    const arc = `A${fmt(radius)} ${fmt(radius)} 0 0 ${sweepFlag}`;
+    const P = 8 * edge + 4 * quarter;
+    const ring = {
+      ring: true,
+      drawn: true,
+      cx,
+      cy,
+      half,
+      radius,
+      edge,
+      quarter,
+      dir,
+      P,
+      // Laps start at the top centre; across the bar they start at the left centre instead,
+      // and the drawn outline turns a quarter so it begins there too.
+      offset: across ? (dir > 0 ? 0.75 : 0.25) * P : 0,
+      turn: across ? -90 : 0,
+      path:
+        `M${x(0)} ${fmt(cy - half)}H${x(edge)}${arc} ${x(half)} ${fmt(cy - edge)}V${fmt(cy + edge)}` +
+        `${arc} ${x(edge)} ${fmt(cy + half)}H${x(-edge)}${arc} ${x(-half)} ${fmt(cy + edge)}` +
+        `V${fmt(cy - edge)}${arc} ${x(-edge)} ${fmt(cy - half)}Z`,
+      at(u, out) {
+        loopPoint(ring, u, out);
+        out.vis = 1;
+      },
+    };
+    ring.length = 1.5 * P;
+    return ring;
+  }
+
+  // Point u px along a ring, from its starting point in its direction of travel.
+  function loopPoint(ring, u, out) {
+    const { cx, cy, half, radius: r, edge: e, quarter: q, P, dir } = ring;
+    let d = mod(u + ring.offset, P);
+    let x;
+    let y;
+    if (d < e) {
+      x = d;
+      y = -half;
+    } else if ((d -= e) < q) {
+      x = e + r * Math.cos(d / r - Math.PI / 2);
+      y = -e + r * Math.sin(d / r - Math.PI / 2);
+    } else if ((d -= q) < 2 * e) {
+      x = half;
+      y = d - e;
+    } else if ((d -= 2 * e) < q) {
+      x = e + r * Math.cos(d / r);
+      y = e + r * Math.sin(d / r);
+    } else if ((d -= q) < 2 * e) {
+      x = e - d;
+      y = half;
+    } else if ((d -= 2 * e) < q) {
+      x = -e + r * Math.cos(d / r + Math.PI / 2);
+      y = e + r * Math.sin(d / r + Math.PI / 2);
+    } else if ((d -= q) < 2 * e) {
+      x = -half;
+      y = e - d;
+    } else if ((d -= 2 * e) < q) {
+      x = -e + r * Math.cos(d / r + Math.PI);
+      y = -e + r * Math.sin(d / r + Math.PI);
+    } else {
+      x = d - q - e;
+      y = -half;
+    }
+    out.x = cx + dir * x;
+    out.y = cy + y;
+  }
+
+  function build({ width, height, across, spots }) {
+    const pieces = [];
+    let length = 0;
+    const add = (piece) => {
+      piece.start = length;
+      length += piece.length;
+      pieces.push(piece);
+      return piece;
+    };
+
+    const first = spots[0];
+    add(across
+      ? straight(0, first.cy, Math.max(0, first.cx - first.half), first.cy, 0, true)
+      : straight(first.cx, 0, first.cx, Math.max(0, first.cy - first.half), 0, true));
+    const rings = spots.map((spot, index) => {
+      const next = spots[index + 1];
+      const ring = add(loop(spot, index % 2 ? -1 : 1, across));
+      ring.index = index;
+      // Each link bows toward the side the next ring turns to, so the light swings into it.
+      const side = index % 2 ? 1 : -1;
+      if (across) {
+        const exit = spot.cx + spot.half;
+        if (next) add(curve(exit, spot.cy, next.cx - next.half, next.cy, side, true));
+        else add(straight(exit, spot.cy, width, spot.cy, 0, true));
+      } else {
+        const bottom = spot.cy + spot.half;
+        const exit = Math.max(bottom, Math.min(spot.labelBottom + LABEL_CLEARANCE, next ? next.cy - next.half - 2 : height));
+        add(straight(spot.cx, bottom, spot.cx, exit, 0.6, false));
+        if (next) add(curve(spot.cx, exit, next.cx, next.cy - next.half, -side, false));
+        else add(straight(spot.cx, exit, spot.cx, height, 0, true));
+      }
+      return ring;
+    });
+
+    const count = Math.max(2, Math.ceil(length) + 1);
+    const xs = new Float32Array(count);
+    const ys = new Float32Array(count);
+    const vis = new Float32Array(count);
+    for (let k = 0, p = 0; k < count; k += 1) {
+      const s = Math.min(k, length);
+      while (p < pieces.length - 1 && s > pieces[p].start + pieces[p].length) p += 1;
+      pieces[p].at(s - pieces[p].start, probe);
+      xs[k] = probe.x;
+      ys[k] = probe.y;
+      vis[k] = probe.vis;
+    }
+
+    rings.forEach((ring) => {
+      ring.a = ring.start;
+      ring.b = ring.start + ring.length;
+      const n = Math.ceil(2 * ring.P) + 2;
+      ring.loopX = new Float32Array(n);
+      ring.loopY = new Float32Array(n);
+      for (let i = 0; i < n; i += 1) {
+        loopPoint(ring, i, probe);
+        ring.loopX[i] = probe.x;
+        ring.loopY[i] = probe.y;
+      }
+    });
+
+    // Capping each frame's step well under a quarter lap keeps lap skipping exact.
+    const maxStep = 0.2 * Math.min(...rings.map((ring) => ring.P));
+    return { width, height, across, pieces, rings, length, xs, ys, vis, maxStep };
+  }
+
+  function paintBase() {
+    const drawn = geo.pieces.filter((piece) => piece.drawn);
+    if (baseParts.length !== drawn.length) {
+      baseParts.forEach((part) => part.remove());
+      baseParts = drawn.map((piece, order) => {
+        const part = document.createElementNS(SVG_NS, "path");
+        part.setAttribute("class", piece.ring ? "rail-ring" : "rail-line");
+        part.setAttribute("pathLength", "1");
+        part.style.setProperty("--d", `${order * 45}ms`);
+        base.append(part);
+        return part;
+      });
+    }
+    drawn.forEach((piece, order) => {
+      const part = baseParts[order];
+      part.setAttribute("d", piece.path);
+      if (!piece.ring) return;
+      if (piece.turn) part.setAttribute("transform", `rotate(${piece.turn} ${fmt(piece.cx)} ${fmt(piece.cy)})`);
+      else part.removeAttribute("transform");
+      nodes[piece.index].ringEl = part;
+      part.classList.toggle("is-active", piece.index === activeIndex);
+    });
+  }
+
+  function sizeCanvases() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    lightCanvas.width = Math.max(1, Math.round(geo.width * dpr));
+    lightCanvas.height = Math.max(1, Math.round(geo.height * dpr));
+    bloomCanvas.width = Math.max(1, Math.round(geo.width * BLOOM_SCALE));
+    bloomCanvas.height = Math.max(1, Math.round(geo.height * BLOOM_SCALE));
+    light.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bloom.setTransform(BLOOM_SCALE, 0, 0, BLOOM_SCALE, 0, 0);
+    light.lineJoin = bloom.lineJoin = "round";
+  }
+
+  function locate(s) {
+    let index = geo.pieces.findIndex((piece) => s <= piece.start + piece.length);
+    if (index < 0) index = geo.pieces.length - 1;
+    const piece = geo.pieces[index];
+    return { index, f: piece.length ? (s - piece.start) / piece.length : 0 };
+  }
+
+  function relayout() {
+    const layout = measure();
+    if (!layout.width || !layout.height) return;
+    // Keep the light at the same point of the same piece; across a layout switch it restarts.
+    const anchor = geo && comet.alive && geo.across === layout.across ? locate(comet.s) : null;
+    if (geo && !anchor) comet.alive = false;
+    readTheme();
+    place(layout.spots);
+    geo = build(layout);
+    sizeCanvases();
+    paintBase();
+    trail.count = 0;
+    cometRing = -1;
+    idle = false;
+    if (anchor) {
+      const piece = geo.pieces[anchor.index];
+      comet.s = piece.start + anchor.f * piece.length;
+    }
+    if (!running) still();
+  }
+
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      relayout();
+    });
+  }
+
+  // ── Motion ──
+
+  function sample(s) {
+    const k = Math.min(geo.xs.length - 2, Math.max(0, Math.floor(s)));
+    const f = Math.min(1, Math.max(0, s - k));
+    probe.x = geo.xs[k] + (geo.xs[k + 1] - geo.xs[k]) * f;
+    probe.y = geo.ys[k] + (geo.ys[k + 1] - geo.ys[k]) * f;
+    probe.vis = geo.vis[k] + (geo.vis[k + 1] - geo.vis[k]) * f;
+  }
+
+  function ringAt(s) {
+    for (const ring of geo.rings) {
+      if (s < ring.a) return -1;
+      if (s <= ring.b) return ring.index;
+    }
+    return -1;
+  }
+
+  // Distance to an icon when every icon on the way is passed with a half lap.
+  function expressGap(s, index) {
+    const goal = geo.rings[index];
+    let gap = 0;
+    if (s < goal.a) {
+      gap = goal.a - s;
+      for (let k = 0; k < index; k += 1) if (s < geo.rings[k].a + geo.rings[k].P / 2) gap -= geo.rings[k].P;
+    } else if (s > goal.b) {
+      gap = s - goal.b;
+      for (let k = index + 1; k < geo.rings.length; k += 1) if (s > geo.rings[k].a + geo.rings[k].P) gap -= geo.rings[k].P;
+    }
+    return Math.max(0, gap);
+  }
+
+  function nearestEnd(index) {
+    return expressGap(0, index) <= expressGap(geo.length, index) ? 0 : geo.length;
+  }
+
+  function pushTrail(t) {
+    trail.x[trail.head] = probe.x;
+    trail.y[trail.head] = probe.y;
+    trail.vis[trail.head] = probe.vis;
+    trail.t[trail.head] = t;
+    trail.head = (trail.head + 1) % TRAIL_CAP;
+    trail.count = Math.min(trail.count + 1, TRAIL_CAP);
+  }
+
+  function pruneTrail(now) {
+    while (trail.count > 0 && now - trail.t[(trail.head - trail.count + TRAIL_CAP) % TRAIL_CAP] > TRAIL_MS) {
+      trail.count -= 1;
+    }
+  }
+
+  function emit(from, to, t0, t1) {
+    const delta = to - from;
+    const steps = Math.ceil(Math.abs(delta) / 2);
+    for (let i = 1; i <= steps; i += 1) {
+      sample(from + (delta * i) / steps);
+      pushTrail(t0 + ((t1 - t0) * i) / steps);
+    }
+  }
+
+  function launch(s, now) {
+    comet.alive = true;
+    comet.s = s;
+    comet.v = s > 0 ? -SPEED_LINK : SPEED_LINK;
+    comet.orbit = 0;
+    trail.count = 0;
+    sample(s);
+    pushTrail(now);
+  }
+
+  // On the way to a held icon, pass the other icons with a half lap instead of 1.5.
+  function shortcut(target) {
+    const index = ringAt(comet.s);
+    if (index < 0 || index === target) return;
+    const ring = geo.rings[index];
+    if (comet.v > 0 && target > index && comet.s < ring.a + ring.P / 2) comet.s += ring.P;
+    else if (comet.v < 0 && target < index && comet.s > ring.a + ring.P) comet.s -= ring.P;
+  }
+
+  // Remember which part of a ring the light has traced so that stretch stays lit.
+  function cover(delta) {
+    const index = ringAt(comet.s);
+    if (index !== cometRing) {
+      cometRing = index;
+      const glow = index >= 0 ? nodes[index].glow : null;
+      if (glow && !glow.full) {
+        glow.u0 = mod(comet.s - geo.rings[index].a, geo.rings[index].P);
+        glow.w = glow.lo = glow.hi = 0;
+      }
+      return;
+    }
+    if (index < 0) return;
+    const glow = nodes[index].glow;
+    glow.w += delta;
+    glow.lo = Math.min(glow.lo, glow.w);
+    glow.hi = Math.max(glow.hi, glow.w);
+    if (glow.hi - glow.lo >= geo.rings[index].P) glow.full = true;
+  }
+
+  function travel(now, dt, target) {
+    const goal = target === null ? null : geo.rings[target];
+    let want;
+    let lag;
+    if (!goal) {
+      comet.orbit = 0;
+      want = ringAt(comet.s) >= 0 ? SPEED_RING : SPEED_LINK;
+      lag = 0.09;
+    } else if (comet.s >= goal.a && comet.s <= goal.b) {
+      if (!comet.orbit) comet.orbit = comet.v < 0 ? -1 : 1;
+      comet.s = goal.a + goal.P / 4 + mod(comet.s - goal.a - goal.P / 4, goal.P);
+      want = comet.orbit * SPEED_ORBIT;
+      lag = 0.3;
+    } else {
+      comet.orbit = 0;
+      want = Math.sign(goal.a - comet.s) * Math.min(SPEED_SEEK, Math.max(SPEED_RING, expressGap(comet.s, target) * 7));
+      lag = 0.07;
+    }
+    comet.v += (want - comet.v) * (1 - Math.exp(-dt / lag));
+    const from = comet.s;
+    const step = Math.max(-geo.maxStep, Math.min(geo.maxStep, comet.v * dt));
+    const to = Math.max(0, Math.min(geo.length, from + step));
+    emit(from, to, now - dt * 1000, now);
+    comet.s = to;
+    if (goal) shortcut(target);
+    cover(to - from);
+    if (!goal && comet.s >= geo.length) {
+      comet.alive = false;
+      comet.restUntil = now + REST_MS;
+    }
+  }
+
+  function flare(index, now) {
+    const glow = nodes[index].glow;
+    glow.burstAt = now;
+    glow.flaredAt = now;
+    glow.full = true;
+    glow.energy = Math.max(glow.energy, 0.85);
+  }
+
+  function setLit(node, lit) {
+    if (node.glow.lit === lit) return;
+    node.glow.lit = lit;
+    node.item.classList.toggle("is-lit", lit);
+  }
+
+  function settleGlow(node, index, now, dt, target) {
+    const glow = node.glow;
+    const inside = index === cometRing;
+    const goal = inside ? (target === null || target === index ? 1 : 0.4) : 0;
+    glow.energy += (goal - glow.energy) * (1 - Math.exp(-dt / (goal > glow.energy ? 0.07 : 0.4)));
+    if (glow.burstAt && now - glow.burstAt > BURST_MS) glow.burstAt = 0;
+    if (!inside && glow.energy < 0.015 && !glow.burstAt) {
+      glow.energy = 0;
+      glow.full = false;
+    }
+    setLit(node, glow.energy > (glow.lit ? 0.22 : 0.45));
+  }
+
+  function update(now, dt) {
+    if (visit && now > visit.until) {
+      visit = null;
+      pendingFlare = null;
+    }
+    const target = hoverIndex ?? visit?.index ?? null;
+    if (!comet.alive && now >= holdUntil) {
+      if (target !== null) launch(nearestEnd(target), now);
+      else if (now >= comet.restUntil) launch(0, now);
+    }
+    if (comet.alive) travel(now, dt, target);
+    else cometRing = -1;
+    if (pendingFlare !== null && pendingFlare === cometRing) {
+      flare(pendingFlare, now);
+      pendingFlare = null;
+    }
+    pruneTrail(now);
+    nodes.forEach((node, index) => settleGlow(node, index, now, dt, target));
+  }
+
+  // ── Drawing ──
+
+  // Clear in device pixels: a scaled clearRect can leave the canvas's last, partly covered row behind.
+  function wipe(ctx) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
+  }
+
+  function roundedRect(ctx, cx, cy, half, radius) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - half);
+    ctx.arcTo(cx + half, cy - half, cx + half, cy + half, radius);
+    ctx.arcTo(cx + half, cy + half, cx - half, cy + half, radius);
+    ctx.arcTo(cx - half, cy + half, cx - half, cy - half, radius);
+    ctx.arcTo(cx - half, cy - half, cx + half, cy - half, radius);
+    ctx.closePath();
+  }
+
+  function traceGlow(ctx, ring, glow) {
+    if (glow.full) {
+      roundedRect(ctx, ring.cx, ring.cy, ring.half, ring.radius);
+      return;
+    }
+    ctx.beginPath();
+    const span = Math.min(ring.P, glow.hi - glow.lo);
+    if (span < 1) return;
+    const start = Math.floor(mod(glow.u0 + glow.lo, ring.P));
+    const end = Math.min(ring.loopX.length - 1, start + Math.ceil(span));
+    ctx.moveTo(ring.loopX[start], ring.loopY[start]);
+    for (let i = start + 1; i <= end; i += 1) ctx.lineTo(ring.loopX[i], ring.loopY[i]);
+  }
+
+  function drawGlow(glow, ring, now, angle) {
+    if (glow.energy > 0.004) {
+      const alpha = Math.min(1, glow.energy);
+      light.lineCap = bloom.lineCap = "round";
+      traceGlow(light, ring, glow);
+      light.globalAlpha = alpha;
+      light.lineWidth = 1.8;
+      light.strokeStyle = sweep(light, ring.cx, ring.cy, angle);
+      light.stroke();
+      traceGlow(bloom, ring, glow);
+      bloom.globalAlpha = alpha * (0.82 + 0.18 * Math.sin(now / 420 + angle));
+      bloom.lineWidth = 7;
+      bloom.strokeStyle = sweep(bloom, ring.cx, ring.cy, angle);
+      bloom.stroke();
+    }
+    if (glow.burstAt) {
+      const k = Math.min(1, (now - glow.burstAt) / BURST_MS);
+      const grow = 14 * (1 - (1 - k) ** 3);
+      [[light, 1.6], [bloom, 6]].forEach(([ctx, width]) => {
+        roundedRect(ctx, ring.cx, ring.cy, ring.half + grow, ring.radius + grow);
+        ctx.globalAlpha = (1 - k) ** 1.6;
+        ctx.lineWidth = width * (1 - k * 0.5);
+        ctx.strokeStyle = sweep(ctx, ring.cx, ring.cy, angle + k * 2);
+        ctx.stroke();
+      });
+    }
+  }
+
+  function drawTrail(now) {
+    let segments = 0;
+    let dist = 0;
+    let newer = (trail.head - 1 + TRAIL_CAP) % TRAIL_CAP;
+    while (segments < trail.count - 1) {
+      const older = (newer - 1 + TRAIL_CAP) % TRAIL_CAP;
+      dist += Math.hypot(trail.x[newer] - trail.x[older], trail.y[newer] - trail.y[older]);
+      if (dist > TRAIL_LEN) break;
+      trail.reach[segments] = dist;
+      segments += 1;
+      newer = older;
+    }
+    light.lineCap = "butt";
+    bloom.lineCap = "round";
+    // Oldest first, so the bright head is painted last.
+    for (let j = segments - 1; j >= 0; j -= 1) {
+      const a = (trail.head - 1 - j + 2 * TRAIL_CAP) % TRAIL_CAP;
+      const b = (a - 1 + TRAIL_CAP) % TRAIL_CAP;
+      const fade = Math.min(1 - (now - trail.t[b]) / TRAIL_MS, 1 - trail.reach[j] / TRAIL_LEN);
+      if (fade <= 0) continue;
+      const vis = (trail.vis[a] + trail.vis[b]) / 2;
+      const color = trailAt(trail.reach[j] / TRAIL_LEN);
+      light.globalAlpha = fade ** 1.3 * vis;
+      light.lineWidth = 0.5 + 2.3 * fade;
+      light.strokeStyle = color;
+      light.beginPath();
+      light.moveTo(trail.x[b], trail.y[b]);
+      light.lineTo(trail.x[a], trail.y[a]);
+      light.stroke();
+      bloom.globalAlpha = fade * 0.8 * vis;
+      bloom.lineWidth = 2 + 8 * fade;
+      bloom.strokeStyle = color;
+      bloom.beginPath();
+      bloom.moveTo(trail.x[b], trail.y[b]);
+      bloom.lineTo(trail.x[a], trail.y[a]);
+      bloom.stroke();
+    }
+    if (comet.alive) drawHead();
+  }
+
+  function drawHead() {
+    sample(comet.s);
+    const color = trailAt(0);
+    bloom.globalAlpha = probe.vis;
+    bloom.fillStyle = color;
+    bloom.beginPath();
+    bloom.arc(probe.x, probe.y, 7, 0, Math.PI * 2);
+    bloom.fill();
+    light.globalAlpha = probe.vis;
+    light.fillStyle = color;
+    light.beginPath();
+    light.arc(probe.x, probe.y, 2.6, 0, Math.PI * 2);
+    light.fill();
+    light.fillStyle = theme.core;
+    light.beginPath();
+    light.arc(probe.x, probe.y, 1.3, 0, Math.PI * 2);
+    light.fill();
+  }
+
+  function render(now) {
+    if (!geo) return;
+    const busy = comet.alive || trail.count > 1 || nodes.some(({ glow }) => glow.energy > 0 || glow.burstAt);
+    if (!busy && idle) return;
+    idle = !busy;
+    wipe(light);
+    wipe(bloom);
+    if (!busy) return;
+    const spin = now * 0.0024;
+    nodes.forEach(({ glow }, index) => drawGlow(glow, geo.rings[index], now, spin + index * 0.9));
+    drawTrail(now);
+  }
+
+  // Reduced motion: no travelling light, just a still ring on the hovered icon.
+  function still() {
+    if (!geo) return;
+    comet.alive = false;
+    trail.count = 0;
+    nodes.forEach((node, index) => {
+      const on = index === hoverIndex;
+      Object.assign(node.glow, { energy: on ? 1 : 0, full: on, burstAt: 0 });
+      setLit(node, on);
+    });
+    idle = false;
+    render(0);
+  }
+
+  // ── Loop and events ──
+
+  function frame(now) {
+    frameId = requestAnimationFrame(frame);
+    const dt = lastFrame ? Math.min(0.034, (now - lastFrame) / 1000) : 1 / 60;
+    lastFrame = now;
+    if (!geo) return;
+    update(now, dt);
+    render(now);
+  }
+
+  function play() {
+    if (running) return;
+    running = true;
+    lastFrame = 0;
+    frameId = requestAnimationFrame(frame);
+  }
+
+  function stop() {
+    running = false;
+    cancelAnimationFrame(frameId);
+  }
+
+  function hold(index) {
+    hoverIndex = index;
+    if (!running) still();
+  }
+
+  function release(index) {
+    if (hoverIndex !== index) return;
+    hoverIndex = null;
+    if (!running) still();
+  }
+
+  function focusOn(index) {
+    if (!running || index < 0) return;
+    const now = performance.now();
+    visit = { index, until: Math.max(now, holdUntil) + VISIT_MS };
+    if (now - nodes[index].glow.flaredAt > 500) pendingFlare = index;
+  }
+
+  function setActive(name) {
+    const index = nodes.findIndex(({ item }) => item.dataset.view === name);
+    if (index === activeIndex) return;
+    activeIndex = index;
+    nodes.forEach((node, i) => node.ringEl?.classList.toggle("is-active", i === index));
+    focusOn(index);
+  }
+
+  nodes.forEach(({ item }, index) => {
+    item.addEventListener("pointerenter", () => hold(index));
+    item.addEventListener("pointerleave", () => release(index));
+    item.addEventListener("focus", () => {
+      if (item.matches(":focus-visible")) hold(index);
+    });
+    item.addEventListener("blur", () => release(index));
+    item.addEventListener("click", () => focusOn(index));
+  });
+
+  reducedMotion.addEventListener("change", () => {
+    if (reducedMotion.matches) {
+      stop();
+      still();
+      return;
+    }
+    nodes.forEach((node) => Object.assign(node.glow, { energy: 0, full: false }));
+    comet.restUntil = 0;
+    play();
+  });
+
+  const calm = reducedMotion.matches;
+  rail.classList.toggle("is-intro", !calm);
+  relayout();
+  requestAnimationFrame(() => requestAnimationFrame(() => rail.classList.add("is-drawn")));
+  new ResizeObserver(schedule).observe(fx);
+  window.addEventListener("resize", schedule);
+  document.fonts?.ready.then(schedule);
+  if (!calm) {
+    holdUntil = performance.now() + INTRO_MS;
+    comet.restUntil = holdUntil;
+    play();
+    window.setTimeout(() => rail.classList.remove("is-intro"), 1600);
+  }
+
+  return { setActive };
+})();
 
 const form = document.querySelector(".search");
 const input = document.querySelector("#q");
-const driveState = document.querySelector(".drive-state");
 const view = document.getElementById("view");
 const hero = document.querySelector(".hero");
 const stage = document.querySelector("main");
@@ -280,6 +951,7 @@ function show(name) {
   view.hidden = pageName === "home";
   stage.classList.toggle("is-page", pageName !== "home");
   items.forEach((item) => item.classList.toggle("is-active", item.dataset.view === pageName));
+  railLight.setActive(pageName);
   if (pageName !== "home") render(pageName);
 }
 
@@ -670,20 +1342,22 @@ form.addEventListener("submit", (event) => {
 window.addEventListener("hashchange", () => show((location.hash || "#home").slice(1)));
 show((location.hash || "#home").slice(1));
 
+// The chip's data-state picks its colours in CSS.
 async function refreshDrive() {
-  if (!driveState) return;
+  const chip = document.querySelector(".drive-chip");
+  const label = document.querySelector(".drive-state-label");
+  if (!chip || !label) return;
+  const labels = { connected: "Connected", syncing: "Syncing", connecting: "Connecting", error: "Error", not_connected: "Not connected" };
+  let state = "not_connected";
   try {
     const [drive] = await api("/api/integrations");
-    const labels = { connected: "Connected", syncing: "Syncing", connecting: "Connecting", error: "Error", not_connected: "Not connected" };
-    const colors = { connected: "#C4A56A", syncing: "#9C7F45", connecting: "#9C7F45", error: "#E2EAE8", not_connected: "#A3B9B5" };
-    driveState.lastChild.textContent = ` ${labels[drive.status] || "Not connected"}`;
-    driveState.style.color = drive.status === "connected" ? "#C4A56A" : "#A3B9B5";
-    const dot = driveState.querySelector("i");
-    if (dot) dot.style.background = colors[drive.status] || colors.not_connected;
-    document.querySelector(".drive-chip")?.setAttribute("aria-label", `Google Drive, ${labels[drive.status] || "Not connected"}`);
+    if (labels[drive.status]) state = drive.status;
   } catch {
-    driveState.lastChild.textContent = " Not connected";
+    state = "not_connected";
   }
+  chip.dataset.state = state;
+  label.textContent = labels[state];
+  chip.setAttribute("aria-label", `Google Drive, ${labels[state]}`);
 }
 
 function markIcon(id, state, label) {
@@ -697,8 +1371,8 @@ function markIcon(id, state, label) {
 
 async function refreshHealth() {
   const label = document.getElementById("status-label");
-  const dot = document.querySelector("#system-status i");
-  if (!label) return;
+  const status = document.getElementById("system-status");
+  if (!label || !status) return;
   try {
     const data = await api("/api/health");
     const status = Object.fromEntries(data.components.map((item) => [item.name, item.status]));
@@ -713,13 +1387,13 @@ async function refreshHealth() {
     );
     const failed = data.components.some((item) => item.status === "error") || database !== "operational";
     label.textContent = failed ? "A system needs attention" : drive === "connected" ? "All systems operational" : "Core systems operational";
-    if (dot) dot.style.background = failed ? "#E2EAE8" : "#C4A56A";
+    status.dataset.state = failed ? "attention" : "ok";
   } catch {
     markIcon("status-network", "is-bad", "Network is offline");
     markIcon("status-database", "is-bad", "Database is unreachable");
     markIcon("status-cloud", "is-bad", "Google Drive status is unknown");
     label.textContent = "Knowledge service offline";
-    if (dot) dot.style.background = "#A3B9B5";
+    status.dataset.state = "offline";
   }
 }
 
