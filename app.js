@@ -1070,7 +1070,7 @@ function renderAbout() {
   page(
     "Company",
     "About us",
-    "Stratacon Agara Global helps clients navigate complexity while keeping the path to a decision clear.",
+    "Stratcon Agara Global helps clients navigate complexity while keeping the path to a decision clear.",
     `<div class="record-grid">
       ${record("What we do", "Services describe current capabilities: government relations, project development, infrastructure, energy, ESG, and market entry.")}
       ${record("What we have done", "Projects and clients appear only when a verified record exists in the knowledge base.")}
